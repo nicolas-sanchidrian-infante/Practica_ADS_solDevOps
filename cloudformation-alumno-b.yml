@@ -1,0 +1,202 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Alumno B - Componentes Linux (LB + DB) integrados con VPC existente
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID de la VPC existente
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: CIDR de la VPC (solo para reglas de seguridad)
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subred pública para el Load Balancer
+  PrivateSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subred para el Database Server (privada recomendada)
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: clave-ad
+    Description: Nombre del par de claves para SSH
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+      - t3.small
+    Description: Tipo de instancia para LB y DB
+  SshCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR permitido para SSH (recomendado tu IP pública /32)
+  HttpCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR permitido para HTTP/HTTPS al LB
+  WebServerSecurityGroupId:
+    Type: String
+    Default: ""
+    Description: ID del SG de Web Servers (opcional) para acceso a PostgreSQL
+  LatestUbuntuAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id
+    Description: AMI más reciente de Ubuntu 22.04
+
+Conditions:
+  UseWebServerSg:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: WebServerSecurityGroupId
+          - ""
+
+Resources:
+  SecurityGroupLB:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG para Load Balancer (Nginx)
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp:
+            Ref: SshCidr
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp:
+            Ref: HttpCidr
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp:
+            Ref: HttpCidr
+      Tags:
+        - Key: Name
+          Value: sg-lb
+
+  SecurityGroupDB:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG para Database Server (PostgreSQL)
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp:
+            Ref: SshCidr
+        - Fn::If:
+            - UseWebServerSg
+            - IpProtocol: tcp
+              FromPort: 5432
+              ToPort: 5432
+              SourceSecurityGroupId:
+                Ref: WebServerSecurityGroupId
+            - Ref: AWS::NoValue
+        - Fn::If:
+            - UseWebServerSg
+            - Ref: AWS::NoValue
+            - IpProtocol: tcp
+              FromPort: 5432
+              ToPort: 5432
+              CidrIp:
+                Ref: VpcCidr
+      Tags:
+        - Key: Name
+          Value: sg-db
+
+  LBInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Ref: LatestUbuntuAmi
+      InstanceType:
+        Ref: InstanceType
+      KeyName:
+        Ref: KeyPairName
+      SubnetId:
+        Ref: PublicSubnetId
+      SecurityGroupIds:
+        - Ref: SecurityGroupLB
+      Tags:
+        - Key: Name
+          Value: LB01
+
+  DBInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Ref: LatestUbuntuAmi
+      InstanceType:
+        Ref: InstanceType
+      KeyName:
+        Ref: KeyPairName
+      SubnetId:
+        Ref: PrivateSubnetId
+      SecurityGroupIds:
+        - Ref: SecurityGroupDB
+      Tags:
+        - Key: Name
+          Value: DB01
+
+  LBEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  LBEipAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+          - LBEip
+          - AllocationId
+      InstanceId:
+        Ref: LBInstance
+
+  DBEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  DBEipAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+          - DBEip
+          - AllocationId
+      InstanceId:
+        Ref: DBInstance
+
+Outputs:
+  SecurityGroupLBId:
+    Description: ID del Security Group del LB
+    Value:
+      Ref: SecurityGroupLB
+  SecurityGroupDBId:
+    Description: ID del Security Group del DB
+    Value:
+      Ref: SecurityGroupDB
+  LBInstanceId:
+    Description: ID de la instancia LB
+    Value:
+      Ref: LBInstance
+  DBInstanceId:
+    Description: ID de la instancia DB
+    Value:
+      Ref: DBInstance
+  LBEip:
+    Description: Elastic IP del LB
+    Value:
+      Ref: LBEip
+  DBEip:
+    Description: Elastic IP del DB
+    Value:
+      Ref: DBEip

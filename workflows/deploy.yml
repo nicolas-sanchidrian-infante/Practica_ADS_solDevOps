@@ -1,0 +1,52 @@
+name: Deploy AWS Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  STACK_ALUMNO_A: alumno-a
+  STACK_ALUMNO_B: alumno-b
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy Alumno A (AD + VPC)
+        run: |
+          aws cloudformation deploy \
+            --stack-name "$STACK_ALUMNO_A" \
+            --template-file "cloudformation-alumno-a.yml" \
+            --capabilities CAPABILITY_NAMED_IAM
+
+      - name: Read outputs from Alumno A
+        id: outputs
+        run: |
+          echo "VPC_ID=$(aws cloudformation describe-stacks --stack-name "$STACK_ALUMNO_A" --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue" --output text)" >> $GITHUB_ENV
+          echo "PUBLIC_SUBNET_ID=$(aws cloudformation describe-stacks --stack-name "$STACK_ALUMNO_A" --query "Stacks[0].Outputs[?OutputKey=='PublicSubnet1Id'].OutputValue" --output text)" >> $GITHUB_ENV
+          echo "PRIVATE_SUBNET_ID=$(aws cloudformation describe-stacks --stack-name "$STACK_ALUMNO_A" --query "Stacks[0].Outputs[?OutputKey=='PrivateSubnet1Id'].OutputValue" --output text)" >> $GITHUB_ENV
+
+      - name: Deploy Alumno B (LB + DB)
+        run: |
+          aws cloudformation deploy \
+            --stack-name "$STACK_ALUMNO_B" \
+            --template-file "cloudformation-alumno-b.yml" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --parameter-overrides \
+              VpcId="$VPC_ID" \
+              PublicSubnetId="$PUBLIC_SUBNET_ID" \
+              PrivateSubnetId="$PRIVATE_SUBNET_ID"
