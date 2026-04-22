@@ -1,0 +1,23 @@
+pipeline {
+  agent any
+
+  stages {
+    stage('Build dynamic inventory') {
+      steps {
+        sh '''
+          chmod +x ansible/inventory/aws_inventory.sh
+          ansible-inventory -i ansible/inventory/aws_inventory.sh --graph
+        '''
+      }
+    }
+
+    stage('Connectivity test') {
+      steps {
+        sh '''
+          ansible linux -i ansible/inventory/aws_inventory.sh -m ping || true
+          ansible windows_personal -i ansible/inventory/aws_inventory.sh -m ansible.windows.win_ping || true
+        '''
+      }
+    }
+  }
+}

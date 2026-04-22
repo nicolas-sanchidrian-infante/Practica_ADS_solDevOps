@@ -1,0 +1,166 @@
+---
+- name: Configurar Nginx en LB personal
+  hosts: linux_personal
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Instalar nginx en personal
+      ansible.builtin.package:
+        name: nginx
+        state: present
+      when: "'postgres' not in group_names"
+
+    - name: Crear directorio de web publica
+      ansible.builtin.file:
+        path: /var/www/public
+        state: directory
+        mode: '0755'
+      when: "'postgres' not in group_names"
+
+    - name: Copiar contenido estatico
+      ansible.builtin.copy:
+        src: ../../ufv-app/public/
+        dest: /var/www/public/
+        mode: preserve
+      when: "'postgres' not in group_names"
+
+    - name: Copiar configuracion Nginx LB
+      ansible.builtin.copy:
+        src: ../../ufv-app/nginx/dt-personal-nginx.conf
+        dest: /etc/nginx/sites-available/default
+        mode: '0644'
+      when: "'postgres' not in group_names"
+
+    - name: Reiniciar nginx en LB
+      ansible.builtin.service:
+        name: nginx
+        state: restarted
+      when: "'postgres' not in group_names"
+
+- name: Configurar PostgreSQL y backup
+  hosts: postgres
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Instalar PostgreSQL
+      ansible.builtin.package:
+        name: postgresql
+        state: present
+
+    - name: Asegurar servicio PostgreSQL activo
+      ansible.builtin.service:
+        name: postgresql
+        enabled: true
+        state: started
+
+    - name: Crear base de datos y usuario de aplicacion
+      ansible.builtin.shell: |
+        sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='academico'" | grep -q 1 || sudo -u postgres createdb academico
+        sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='backend'" | grep -q 1 || sudo -u postgres psql -c "CREATE USER backend WITH PASSWORD 'ContraseñaSegura123';"
+        sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE academico TO backend;"
+      args:
+        executable: /bin/bash
+
+    - name: Crear esquema base academico
+      ansible.builtin.shell: |
+        sudo -u postgres psql -d academico <<'SQL'
+        CREATE SCHEMA IF NOT EXISTS academico;
+        CREATE TABLE IF NOT EXISTS academico.asignaturas (
+          id SERIAL PRIMARY KEY,
+          nombre VARCHAR(120) NOT NULL,
+          descripcion TEXT,
+          creditos INTEGER DEFAULT 6,
+          fecha_creacion TIMESTAMP DEFAULT NOW()
+        );
+        SQL
+      args:
+        executable: /bin/bash
+
+    - name: Crear script de backup
+      ansible.builtin.copy:
+        dest: /usr/local/bin/backup_academico.sh
+        mode: '0755'
+        content: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          mkdir -p /var/backups/postgresql
+          sudo -u postgres pg_dump academico > /var/backups/postgresql/academico_$(date +%F_%H%M%S).sql
+
+    - name: Programar backup diario
+      ansible.builtin.cron:
+        name: backup diario academico
+        user: root
+        minute: "15"
+        hour: "2"
+        job: "/usr/local/bin/backup_academico.sh"
+
+- name: Despliegue Node en linux_ufv
+  hosts: linux_ufv
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Instalar paquetes base web
+      ansible.builtin.package:
+        name:
+          - nginx
+          - nodejs
+          - npm
+        state: present
+
+    - name: Copiar configuracion Nginx UFV
+      ansible.builtin.copy:
+        src: ../../ufv-app/nginx/dt-ufv-nginx.conf
+        dest: /etc/nginx/sites-available/default
+        mode: '0644'
+
+    - name: Crear directorio app node
+      ansible.builtin.file:
+        path: /opt/ufv-node
+        state: directory
+        mode: '0755'
+
+    - name: Copiar package.json
+      ansible.builtin.copy:
+        src: ../../ufv-app/node/package.json
+        dest: /opt/ufv-node/package.json
+        mode: '0644'
+
+    - name: Copiar profesores.js
+      ansible.builtin.copy:
+        src: ../../ufv-app/node/profesores.js
+        dest: /opt/ufv-node/profesores.js
+        mode: '0644'
+
+    - name: Instalar dependencias npm
+      ansible.builtin.command: npm install
+      args:
+        chdir: /opt/ufv-node
+
+    - name: Crear unit service node
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ufvNodeService.service
+        content: |
+          [Unit]
+          Description=UFV Node Service
+          After=network.target
+
+          [Service]
+          Type=simple
+          WorkingDirectory=/opt/ufv-node
+          ExecStart=/usr/bin/node /opt/ufv-node/profesores.js
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable/start node service
+      ansible.builtin.systemd:
+        name: ufvNodeService
+        daemon_reload: true
+        enabled: true
+        state: restarted
+
+    - name: Reiniciar nginx en UFV
+      ansible.builtin.service:
+        name: nginx
+        state: restarted

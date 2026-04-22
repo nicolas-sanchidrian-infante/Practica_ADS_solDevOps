@@ -1,0 +1,103 @@
+---
+- name: Configurar AD, DNS y NTP (base)
+  hosts: windows_personal
+  gather_facts: false
+  vars:
+    ad_domain: corp.ufv.local
+    ad_netbios: CORP
+    ad_safe_mode_password: Airbusds2026!
+    ad_default_user_password: Airbusds2026!
+    ad_ou: OU=Alumnos,DC=corp,DC=ufv,DC=local
+  tasks:
+    - name: Ensure AD-Domain-Services feature installed
+      ansible.windows.win_feature:
+        name: AD-Domain-Services
+        state: present
+
+    - name: Ensure DNS feature installed
+      ansible.windows.win_feature:
+        name: DNS
+        state: present
+
+    - name: Ensure GPMC feature installed
+      ansible.windows.win_feature:
+        name: GPMC
+        state: present
+
+    - name: Ensure file server feature installed (CIFS share)
+      ansible.windows.win_feature:
+        name: FS-FileServer
+        state: present
+
+    - name: Promote server to domain controller if domain not present
+      ansible.windows.win_shell: |
+        if (-not (Get-ADDomain -Identity "{{ ad_domain }}" -ErrorAction SilentlyContinue)) {
+          $pass = ConvertTo-SecureString "{{ ad_safe_mode_password }}" -AsPlainText -Force
+          Install-ADDSForest -DomainName "{{ ad_domain }}" -DomainNetbiosName "{{ ad_netbios }}" -SafeModeAdministratorPassword $pass -InstallDns -Force -NoRebootOnCompletion
+          Write-Output "DOMAIN_CREATED"
+        } else {
+          Write-Output "DOMAIN_EXISTS"
+        }
+      register: ad_promotion
+      changed_when: "'DOMAIN_CREATED' in ad_promotion.stdout"
+
+    - name: Reboot after AD promotion
+      ansible.windows.win_reboot:
+      when: "'DOMAIN_CREATED' in ad_promotion.stdout"
+
+    - name: Ensure OU exists
+      ansible.windows.win_shell: |
+        if (-not (Get-ADOrganizationalUnit -LDAPFilter "(ou=Alumnos)" -SearchBase "DC=corp,DC=ufv,DC=local" -ErrorAction SilentlyContinue)) {
+          New-ADOrganizationalUnit -Name "Alumnos" -Path "DC=corp,DC=ufv,DC=local"
+          Write-Output "OU_CREATED"
+        }
+      changed_when: true
+
+    - name: Ensure AD group exists
+      ansible.windows.win_shell: |
+        if (-not (Get-ADGroup -Identity "grupo_alumnos" -ErrorAction SilentlyContinue)) {
+          New-ADGroup -Name "grupo_alumnos" -GroupScope Global -Path "{{ ad_ou }}"
+          Write-Output "GROUP_CREATED"
+        }
+      changed_when: true
+
+    - name: Ensure demo users exist and belong to group
+      ansible.windows.win_shell: |
+        $pass = ConvertTo-SecureString "{{ ad_default_user_password }}" -AsPlainText -Force
+        foreach ($u in @("alumno1","alumno2")) {
+          if (-not (Get-ADUser -Identity $u -ErrorAction SilentlyContinue)) {
+            New-ADUser -Name $u -SamAccountName $u -AccountPassword $pass -Enabled $true -Path "{{ ad_ou }}"
+          }
+          Add-ADGroupMember -Identity "grupo_alumnos" -Members $u -ErrorAction SilentlyContinue
+        }
+      changed_when: true
+
+    - name: Ensure CIFS folder exists
+      ansible.windows.win_file:
+        path: C:\Compartido
+        state: directory
+
+    - name: Ensure CIFS share exists
+      ansible.windows.win_shell: |
+        if (-not (Get-SmbShare -Name "CompartidoAlumnos" -ErrorAction SilentlyContinue)) {
+          New-SmbShare -Name "CompartidoAlumnos" -Path "C:\Compartido" -FullAccess "{{ ad_netbios }}\\Domain Admins"
+          Write-Output "SHARE_CREATED"
+        }
+      changed_when: true
+
+    - name: Ensure GPOs exist (shutdown restriction + network drive)
+      ansible.windows.win_shell: |
+        Import-Module GroupPolicy
+        if (-not (Get-GPO -Name "GPO_NoShutdown" -ErrorAction SilentlyContinue)) {
+          New-GPO -Name "GPO_NoShutdown" | Out-Null
+        }
+        if (-not (Get-GPO -Name "GPO_MapDrive" -ErrorAction SilentlyContinue)) {
+          New-GPO -Name "GPO_MapDrive" | Out-Null
+        }
+      changed_when: true
+
+    - name: Configurar servicio horario NTP (w32time)
+      ansible.windows.win_shell: |
+        w32tm /config /manualpeerlist:"pool.ntp.org" /syncfromflags:manual /update
+        Restart-Service w32time
+      changed_when: true

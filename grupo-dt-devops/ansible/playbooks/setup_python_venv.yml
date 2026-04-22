@@ -1,0 +1,19 @@
+---
+- name: Crear virtualenv en servidores nginx
+  hosts: nginx
+  become: true
+  gather_facts: false
+  vars:
+    venv_path: /opt/venv/app
+  tasks:
+    - name: Instalar Python venv
+      ansible.builtin.package:
+        name:
+          - python3
+          - python3-venv
+        state: present
+
+    - name: Crear virtualenv
+      ansible.builtin.command: python3 -m venv {{ venv_path }}
+      args:
+        creates: "{{ venv_path }}/bin/activate"

@@ -1,0 +1,362 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Grupo DT - Cuenta Alumno A (AlejandroA) (AD + PostgreSQL + Nginx LB)
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.0.1.0/24
+  PrivateSubnetCidr:
+    Type: String
+    Default: 10.0.11.0/24
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+  AmiLinux:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+  AmiWindows:
+    Type: AWS::EC2::Image::Id
+    Default: ami-0349104b138bf332c
+  AdminCidr:
+    Type: String
+    Default: 0.0.0.0/0
+  HttpCidr:
+    Type: String
+    Default: 0.0.0.0/0
+  UfvVpcCidr:
+    Type: String
+    Default: 10.1.0.0/16
+  BudgetLimitUSD:
+    Type: Number
+    Default: 10
+  BudgetEmail:
+    Type: String
+    Default: admin@example.com
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: DT-vpc-personal
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  AttachIgw:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetCidr
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetCidr
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [0, !GetAZs '']
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachIgw
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PrivateRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet
+
+  ADSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG AD DC01
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: !Ref AdminCidr
+        - IpProtocol: tcp
+          FromPort: 5985
+          ToPort: 5986
+          CidrIp: !Ref AdminCidr
+        - IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref VpcCidr
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref VpcCidr
+        - IpProtocol: tcp
+          FromPort: 88
+          ToPort: 88
+          CidrIp: !Ref VpcCidr
+        - IpProtocol: udp
+          FromPort: 88
+          ToPort: 88
+          CidrIp: !Ref VpcCidr
+        - IpProtocol: tcp
+          FromPort: 389
+          ToPort: 389
+          CidrIp: !Ref VpcCidr
+        - IpProtocol: udp
+          FromPort: 123
+          ToPort: 123
+          CidrIp: !Ref VpcCidr
+        - IpProtocol: udp
+          FromPort: 67
+          ToPort: 68
+          CidrIp: !Ref VpcCidr
+      Tags:
+        - Key: Name
+          Value: DT-sg-ad
+
+  WindowsClientSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG Windows Client
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: !Ref AdminCidr
+        - IpProtocol: tcp
+          FromPort: 5985
+          ToPort: 5986
+          CidrIp: !Ref AdminCidr
+        - IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref VpcCidr
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref VpcCidr
+      Tags:
+        - Key: Name
+          Value: DT-sg-win-client
+
+  LBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG Nginx LB
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AdminCidr
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref HttpCidr
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref HttpCidr
+      Tags:
+        - Key: Name
+          Value: DT-sg-lb
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG PostgreSQL
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AdminCidr
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: !Ref UfvVpcCidr
+      Tags:
+        - Key: Name
+          Value: DT-sg-db
+
+  PostgresInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiLinux
+      InstanceType: t3.micro
+      KeyName: !Ref KeyPairName
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref DatabaseSecurityGroup]
+      Tags:
+        - Key: Name
+          Value: DT-PostgreSQL
+
+  LBInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiLinux
+      InstanceType: t3.micro
+      KeyName: !Ref KeyPairName
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref LBSecurityGroup]
+      Tags:
+        - Key: Name
+          Value: DT-Nginx-LB
+
+  ADInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiWindows
+      InstanceType: t3.medium
+      KeyName: !Ref KeyPairName
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref ADSecurityGroup]
+      Tags:
+        - Key: Name
+          Value: DT-DC01
+
+  WindowsClientInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiWindows
+      InstanceType: t3.medium
+      KeyName: !Ref KeyPairName
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref WindowsClientSecurityGroup]
+      Tags:
+        - Key: Name
+          Value: WIN-CLIENT01
+
+  ADEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  ADEipAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt ADEip.AllocationId
+      InstanceId: !Ref ADInstance
+
+  LBEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  LBEipAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt LBEip.AllocationId
+      InstanceId: !Ref LBInstance
+
+  DBEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  DBEipAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt DBEip.AllocationId
+      InstanceId: !Ref PostgresInstance
+
+  WinClientEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  WinClientEipAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt WinClientEip.AllocationId
+      InstanceId: !Ref WindowsClientInstance
+
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: DT-Mensual
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref BudgetLimitUSD
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 85
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+
+Outputs:
+  VpcId:
+    Value: !Ref VPC
+  VpcCidr:
+    Value: !Ref VpcCidr
+  PublicSubnetId:
+    Value: !Ref PublicSubnet
+  PrivateSubnetId:
+    Value: !Ref PrivateSubnet
+  RouteTableId:
+    Value: !Ref PublicRouteTable
+  PrivateRouteTableId:
+    Value: !Ref PrivateRouteTable
+  PostgresInstanceId:
+    Value: !Ref PostgresInstance
+  LBInstanceId:
+    Value: !Ref LBInstance
+  ADInstanceId:
+    Value: !Ref ADInstance
+  WindowsClientInstanceId:
+    Value: !Ref WindowsClientInstance
+  ADEip:
+    Value: !Ref ADEip
+  LBEip:
+    Value: !Ref LBEip
+  DBEip:
+    Value: !Ref DBEip
+  WinClientEip:
+    Value: !Ref WinClientEip

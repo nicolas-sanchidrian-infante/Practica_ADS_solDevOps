@@ -377,8 +377,8 @@ sudo cat /var/lib/jenkins/secrets/initialAdminPassword
 
 ## 8. configuracion jobs Jenkins ufv-infra — Infraestructura AWS Multi-Cuenta + Ansible
 
-Proyecto unificado para desplegar y gestionar infraestructura AWS en dos cuentas
-(`AlexPersonal` y `AlexUFV`) con VPC Peering cross-account, y automatizar la
+Proyecto unificado para desplegar y gestionar infraestructura AWS en perfiles de alumnos
+(`AlejandroA`, `NicolasB`, `MarioC`, `GonzaloD`, `JesusE`) con VPC Peering cross-account, y automatizar la
 configuración y despliegue de la aplicación académica con Ansible desde Jenkins.
 
 ---
@@ -389,7 +389,7 @@ configuración y despliegue de la aplicación académica con Ansible desde Jenki
 Internet
     │
     ▼
-AlexPersonal (10.0.0.0/16)              AlexUFV (10.1.0.0/16)
+AlejandroA (10.0.0.0/16)                NicolasB (10.1.0.0/16)
 ┌────────────────────────────┐          ┌────────────────────────────┐
 │  10.0.1.10  PostgreSQL     │          │  10.1.1.10  Nginx + Node   │
 │  10.0.1.11  Nginx (LB)     │◄────────►│  10.1.1.11  Nginx + Node   │
@@ -420,8 +420,8 @@ Instancias UFV → 10.1.1.10 y 10.1.1.11
 | Origen | Destino | Regla |
 |---|---|---|
 | Mi IP (Jenkins) | Todos | Todo el tráfico (-1) |
-| 10.1.0.0/16 | AlexPersonal Linux | Todo el tráfico (-1) |
-| 10.0.0.0/16 | AlexUFV | Todo el tráfico (-1) |
+| 10.1.0.0/16 | AlejandroA Linux | Todo el tráfico (-1) |
+| 10.0.0.0/16 | NicolasB | Todo el tráfico (-1) |
 | 0.0.0.0/0 | Linux (HTTP) | TCP 80 |
 | 0.0.0.0/0 | Windows (WinRM) | TCP 5985/5986 |
 
@@ -432,8 +432,8 @@ Instancias UFV → 10.1.1.10 y 10.1.1.11
 ```
 ufv-infra/
 ├── cloudformation/
-│   ├── stack-personal.yaml     # VPC + 2 EC2 Linux + EC2 Windows (AlexPersonal)
-│   └── stack-ufv.yaml          # VPC + 2 EC2 Linux (AlexUFV)
+│   ├── stack-personal.yaml     # VPC + 2 EC2 Linux + EC2 Windows (AlejandroA)
+│   └── stack-ufv.yaml          # VPC + 2 EC2 Linux (NicolasB)
 │
 ├── jenkins/
 │   ├── Jenkinsfile-infra        # Pipeline CloudFormation + VPC Peering
@@ -459,8 +459,8 @@ ufv-infra/
 │
 ├── ufv-app/                     # Código y assets de la aplicación
 │   ├── nginx/
-│   │   ├── AlexPersonal_nginx.conf   # Config nginx load balancer
-│   │   └── AlexUFV_nginx.conf        # Config nginx proxy Node.js
+│   │   ├── dt-personal-nginx.conf    # Config nginx load balancer
+│   │   └── dt-ufv-nginx.conf         # Config nginx proxy Node.js
 │   ├── node/
 │   │   ├── package.json              # Dependencias Node.js
 │   │   └── profesores.js             # API REST gestión de asignaturas (puerto 3001)
@@ -483,19 +483,40 @@ ufv-infra/
 
 ```ini
 # ~/.aws/credentials
-[AlexPersonal]
+[AlejandroA]
 aws_access_key_id     = AKIA...
 aws_secret_access_key = ...
 
-[AlexUFV]
+[NicolasB]
+aws_access_key_id     = AKIA...
+aws_secret_access_key = ...
+
+[MarioC]
+aws_access_key_id     = AKIA...
+aws_secret_access_key = ...
+
+[GonzaloD]
+aws_access_key_id     = AKIA...
+aws_secret_access_key = ...
+
+[JesusE]
 aws_access_key_id     = AKIA...
 aws_secret_access_key = ...
 
 # ~/.aws/config
-[profile AlexPersonal]
+[profile AlejandroA]
 region = eu-south-2
 
-[profile AlexUFV]
+[profile NicolasB]
+region = eu-south-2
+
+[profile MarioC]
+region = eu-south-2
+
+[profile GonzaloD]
+region = eu-south-2
+
+[profile JesusE]
 region = eu-south-2
 ```
 
@@ -503,11 +524,11 @@ region = eu-south-2
 
 ```bash
 aws ec2 create-key-pair --key-name aws \
-  --profile AlexPersonal --region eu-south-2 \
+  --profile AlejandroA --region eu-south-2 \
   --query 'KeyMaterial' --output text > ~/.ssh/aws.pem && chmod 400 ~/.ssh/aws.pem
 
 aws ec2 create-key-pair --key-name aws_ufv \
-  --profile AlexUFV --region eu-south-2 \
+  --profile NicolasB --region eu-south-2 \
   --query 'KeyMaterial' --output text > ~/.ssh/aws_ufv.pem && chmod 400 ~/.ssh/aws_ufv.pem
 ```
 
@@ -555,8 +576,8 @@ Despliega / destruye toda la infraestructura con CloudFormation y configura el V
 
 | Parámetro | Default | Descripción |
 |---|---|---|
-| `KEY_PAIR_PERSONAL` | `aws` | Key Pair en AlexPersonal |
-| `KEY_PAIR_UFV` | `aws_ufv` | Key Pair en AlexUFV |
+| `KEY_PAIR_PERSONAL` | `aws` | Key Pair en AlejandroA |
+| `KEY_PAIR_UFV` | `aws_ufv` | Key Pair en NicolasB |
 | `AMI_LINUX` | `ami-073422177b6b3ed22` | AMI Amazon Linux 2023 |
 | `AMI_WINDOWS` | `ami-0349104b138bf332c` | AMI Windows Server 2019 |
 | `AWS_REGION` | `eu-south-2` | Región AWS |
@@ -624,7 +645,7 @@ Actualiza el contenido estático y el código Node.js sin tocar la infraestructu
 
 ## Inventario dinámico
 
-El script `ansible/inventory/aws_inventory.sh` consulta AWS en tiempo real usando los perfiles `AlexPersonal` y `AlexUFV`, y genera los grupos:
+El script `ansible/inventory/aws_inventory.sh` consulta AWS en tiempo real usando los perfiles `AlejandroA`, `NicolasB`, `MarioC`, `GonzaloD` y `JesusE`, y genera los grupos:
 
 | Grupo | Hosts | ansible_host |
 |---|---|---|
@@ -714,9 +735,9 @@ Para actualizaciones posteriores de la web: solo lanzar `AWS-UFV-Ansible-Web-Dep
 ### Stack en ROLLBACK
 ```bash
 aws cloudformation delete-stack --stack-name stack-personal \
-  --profile AlexPersonal --region eu-south-2
+  --profile AlejandroA --region eu-south-2
 aws cloudformation wait stack-delete-complete --stack-name stack-personal \
-  --profile AlexPersonal --region eu-south-2
+  --profile AlejandroA --region eu-south-2
 ```
 
 ### Ver logs del UserData en la instancia
@@ -750,7 +771,7 @@ sudo journalctl -u ufvNodeService -n 50
 
 ### VPC Peering no conecta (verificar rutas)
 ```bash
-aws ec2 describe-route-tables --profile AlexPersonal --region eu-south-2 \
+aws ec2 describe-route-tables --profile AlejandroA --region eu-south-2 \
   --filters "Name=vpc-id,Values=<vpc-id>" \
   --query 'RouteTables[*].Routes[*].[DestinationCidrBlock,VpcPeeringConnectionId,State]' \
   --output table

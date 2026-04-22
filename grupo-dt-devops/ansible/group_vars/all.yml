@@ -1,0 +1,13 @@
+---
+project_group: DT
+ad_domain: corp.ufv.local
+linux_ssh_user: ansible
+linux_ssh_password: Airbusds2026
+windows_user: ansible
+windows_password: Airbusds2026
+venv_path: /opt/venv/app
+node_service_name: ufvNodeService
+postgres_host: 10.0.1.10
+postgres_db: academico
+postgres_user: backend
+postgres_password: ContraseñaSegura123

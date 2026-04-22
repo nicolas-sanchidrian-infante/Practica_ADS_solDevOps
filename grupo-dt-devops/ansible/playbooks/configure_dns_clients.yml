@@ -1,0 +1,39 @@
+---
+- name: Configurar DNS/NTP Linux apuntando a DC01
+  hosts: linux
+  become: true
+  gather_facts: false
+  vars:
+    ad_dns_ip: "{{ hostvars[groups['windows_personal'][0]].ansible_host | default('10.0.1.12') }}"
+  tasks:
+    - name: Instalar chrony
+      ansible.builtin.package:
+        name: chrony
+        state: present
+
+    - name: Configurar chrony con AD
+      ansible.builtin.copy:
+        dest: /etc/chrony.conf
+        content: |
+          server {{ ad_dns_ip }} iburst
+          driftfile /var/lib/chrony/drift
+          rtcsync
+
+    - name: Reiniciar chrony
+      ansible.builtin.service:
+        name: chrony
+        state: restarted
+
+    - name: Configurar DNS resolver systemd
+      ansible.builtin.copy:
+        dest: /etc/systemd/resolved.conf
+        content: |
+          [Resolve]
+          DNS={{ ad_dns_ip }}
+      notify: restart resolved
+
+  handlers:
+    - name: restart resolved
+      ansible.builtin.service:
+        name: systemd-resolved
+        state: restarted

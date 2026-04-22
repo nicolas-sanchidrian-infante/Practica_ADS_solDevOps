@@ -1,0 +1,27 @@
+pipeline {
+  agent any
+
+  parameters {
+    choice(name: 'PLAYBOOK', choices: ['update_inventory', 'setup_ad_dns_ntp', 'configure_dns_clients', 'setup_python_venv', 'deploy_app', 'all'], description: 'Playbook a ejecutar')
+  }
+
+  stages {
+    stage('Provision') {
+      steps {
+        sh '''
+          set -e
+          INVENTORY=ansible/inventory/aws_inventory.sh
+          if [ "$PLAYBOOK" = "all" ]; then
+            ansible-playbook -i $INVENTORY ansible/playbooks/update_inventory.yml
+            ansible-playbook -i $INVENTORY ansible/playbooks/setup_ad_dns_ntp.yml
+            ansible-playbook -i $INVENTORY ansible/playbooks/configure_dns_clients.yml
+            ansible-playbook -i $INVENTORY ansible/playbooks/setup_python_venv.yml
+            ansible-playbook -i $INVENTORY ansible/playbooks/deploy_app.yml
+          else
+            ansible-playbook -i $INVENTORY ansible/playbooks/$PLAYBOOK.yml
+          fi
+        '''
+      }
+    }
+  }
+}

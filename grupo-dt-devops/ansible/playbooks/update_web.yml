@@ -1,0 +1,32 @@
+---
+- name: Actualizar contenido web
+  hosts: nginx
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Sincronizar public
+      ansible.builtin.copy:
+        src: ../../ufv-app/public/
+        dest: /var/www/public/
+        mode: preserve
+
+    - name: Reiniciar nginx
+      ansible.builtin.service:
+        name: nginx
+        state: restarted
+
+- name: Actualizar backend node en UFV
+  hosts: linux_ufv
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Copiar profesores.js actualizado
+      ansible.builtin.copy:
+        src: ../../ufv-app/node/profesores.js
+        dest: /opt/ufv-node/profesores.js
+        mode: '0644'
+
+    - name: Reiniciar servicio node
+      ansible.builtin.systemd:
+        name: ufvNodeService
+        state: restarted

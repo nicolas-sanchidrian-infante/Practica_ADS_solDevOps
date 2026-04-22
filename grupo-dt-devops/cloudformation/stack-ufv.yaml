@@ -1,0 +1,204 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Grupo DT - Cuenta Alumno B (NicolasB) (2 webservers Linux)
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: 10.1.0.0/16
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.1.1.0/24
+  PrivateSubnetCidr:
+    Type: String
+    Default: 10.1.11.0/24
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+  AmiLinux:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+  AdminCidr:
+    Type: String
+    Default: 0.0.0.0/0
+  HttpCidr:
+    Type: String
+    Default: 0.0.0.0/0
+  PersonalVpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: DT-vpc-ufv
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  AttachIgw:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetCidr
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetCidr
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [0, !GetAZs '']
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachIgw
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PrivateRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet
+
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG UFV DT
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AdminCidr
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref PersonalVpcCidr
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref HttpCidr
+      Tags:
+        - Key: Name
+          Value: DT-sg-ufv-web
+
+  WebS3Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
+  WebS3InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref WebS3Role
+
+  Web01Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiLinux
+      InstanceType: t3.micro
+      KeyName: !Ref KeyPairName
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref WebSecurityGroup]
+      IamInstanceProfile: !Ref WebS3InstanceProfile
+      Tags:
+        - Key: Name
+          Value: DT-UFV-Web01
+
+  Web02Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiLinux
+      InstanceType: t3.micro
+      KeyName: !Ref KeyPairName
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref WebSecurityGroup]
+      IamInstanceProfile: !Ref WebS3InstanceProfile
+      Tags:
+        - Key: Name
+          Value: DT-UFV-Web02
+
+  Web01Eip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  Web01EipAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt Web01Eip.AllocationId
+      InstanceId: !Ref Web01Instance
+
+  Web02Eip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  Web02EipAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt Web02Eip.AllocationId
+      InstanceId: !Ref Web02Instance
+
+Outputs:
+  VpcId:
+    Value: !Ref VPC
+  VpcCidr:
+    Value: !Ref VpcCidr
+  PublicSubnetId:
+    Value: !Ref PublicSubnet
+  PrivateSubnetId:
+    Value: !Ref PrivateSubnet
+  RouteTableId:
+    Value: !Ref PublicRouteTable
+  PrivateRouteTableId:
+    Value: !Ref PrivateRouteTable
+  Web01InstanceId:
+    Value: !Ref Web01Instance
+  Web02InstanceId:
+    Value: !Ref Web02Instance
+  Web01Eip:
+    Value: !Ref Web01Eip
+  Web02Eip:
+    Value: !Ref Web02Eip

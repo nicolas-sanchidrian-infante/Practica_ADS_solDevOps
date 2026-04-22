@@ -1,0 +1,11 @@
+pipeline {
+  agent any
+
+  stages {
+    stage('Update web') {
+      steps {
+        sh 'ansible-playbook -i ansible/inventory/aws_inventory.sh ansible/playbooks/update_web.yml -v'
+      }
+    }
+  }
+}

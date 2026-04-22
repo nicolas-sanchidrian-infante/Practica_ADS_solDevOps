@@ -1,0 +1,76 @@
+name: DT Deploy Infraestructura
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: deploy o destroy
+        required: true
+        default: deploy
+  push:
+    branches: [main]
+    paths:
+      - 'cloudformation/**'
+      - '.github/workflows/deploy.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      PROFILE_A: AlejandroA
+      PROFILE_B: NicolasB
+      PROFILE_C: MarioC
+      PROFILE_D: GonzaloD
+      PROFILE_E: JesusE
+      STACK_PERSONAL: dt-stack-personal
+      STACK_UFV: dt-stack-ufv
+      ACTION: ${{ github.event.inputs.action || 'deploy' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar AWS credentials (cuenta personal)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_A }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_A }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy stack personal
+        if: env.ACTION == 'deploy'
+        run: |
+          aws cloudformation deploy \
+            --stack-name "$STACK_PERSONAL" \
+            --template-file cloudformation/stack-personal.yaml \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --parameter-overrides KeyPairName=${{ secrets.KEY_PAIR_A }} AdminCidr=${{ secrets.ADMIN_CIDR }}
+
+      - name: Destroy stack personal
+        if: env.ACTION == 'destroy'
+        run: |
+          aws cloudformation delete-stack --stack-name "$STACK_PERSONAL"
+          aws cloudformation wait stack-delete-complete --stack-name "$STACK_PERSONAL"
+
+      - name: Configurar AWS credentials (cuenta UFV)
+        if: env.ACTION == 'deploy'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_B }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_B }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy stack UFV
+        if: env.ACTION == 'deploy'
+        run: |
+          aws cloudformation deploy \
+            --stack-name "$STACK_UFV" \
+            --template-file cloudformation/stack-ufv.yaml \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --parameter-overrides KeyPairName=${{ secrets.KEY_PAIR_B }} AdminCidr=${{ secrets.ADMIN_CIDR }}
+
+      - name: Destroy stack UFV
+        if: env.ACTION == 'destroy'
+        run: |
+          aws cloudformation delete-stack --stack-name "$STACK_UFV"
+          aws cloudformation wait stack-delete-complete --stack-name "$STACK_UFV"

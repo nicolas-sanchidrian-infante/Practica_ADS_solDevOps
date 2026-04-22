@@ -1,0 +1,113 @@
+pipeline {
+  agent any
+
+  parameters {
+    choice(name: 'ACTION', choices: ['deploy', 'destroy'], description: 'Accion sobre la infraestructura')
+    string(name: 'AWS_REGION', defaultValue: 'eu-south-2', description: 'Region AWS')
+    string(name: 'PROFILE_A', defaultValue: 'AlejandroA', description: 'Perfil AWS Alumno A')
+    string(name: 'PROFILE_B', defaultValue: 'NicolasB', description: 'Perfil AWS Alumno B')
+    string(name: 'PROFILE_C', defaultValue: 'MarioC', description: 'Perfil AWS Alumno C')
+    string(name: 'PROFILE_D', defaultValue: 'GonzaloD', description: 'Perfil AWS Alumno D')
+    string(name: 'PROFILE_E', defaultValue: 'JesusE', description: 'Perfil AWS Alumno E')
+    string(name: 'KEY_PAIR_PERSONAL', defaultValue: 'aws', description: 'Key pair cuenta personal')
+    string(name: 'KEY_PAIR_UFV', defaultValue: 'aws_ufv', description: 'Key pair cuenta UFV')
+    string(name: 'ADMIN_CIDR', defaultValue: '0.0.0.0/0', description: 'CIDR administrativo')
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('CloudFormation Infra') {
+      steps {
+        sh '''
+          set -e
+          ensure_route () {
+            local profile="$1"
+            local region="$2"
+            local route_table_id="$3"
+            local dest_cidr="$4"
+            local peering_id="$5"
+
+            aws ec2 replace-route \
+              --profile "$profile" \
+              --region "$region" \
+              --route-table-id "$route_table_id" \
+              --destination-cidr-block "$dest_cidr" \
+              --vpc-peering-connection-id "$peering_id" \
+              >/dev/null 2>&1 || \
+            aws ec2 create-route \
+              --profile "$profile" \
+              --region "$region" \
+              --route-table-id "$route_table_id" \
+              --destination-cidr-block "$dest_cidr" \
+              --vpc-peering-connection-id "$peering_id" \
+              >/dev/null
+          }
+
+          if [ "$ACTION" = "deploy" ]; then
+            aws sts get-caller-identity --profile "$PROFILE_A" >/dev/null
+            aws sts get-caller-identity --profile "$PROFILE_B" >/dev/null
+            aws sts get-caller-identity --profile "$PROFILE_C" >/dev/null
+            aws sts get-caller-identity --profile "$PROFILE_D" >/dev/null
+            aws sts get-caller-identity --profile "$PROFILE_E" >/dev/null
+
+            aws cloudformation deploy --profile "$PROFILE_A" --region "$AWS_REGION" \
+              --stack-name dt-stack-personal \
+              --template-file cloudformation/stack-personal.yaml \
+              --parameter-overrides KeyPairName="$KEY_PAIR_PERSONAL" AdminCidr="$ADMIN_CIDR"
+
+            aws cloudformation deploy --profile "$PROFILE_B" --region "$AWS_REGION" \
+              --stack-name dt-stack-ufv \
+              --template-file cloudformation/stack-ufv.yaml \
+              --parameter-overrides KeyPairName="$KEY_PAIR_UFV" AdminCidr="$ADMIN_CIDR"
+
+            PERSONAL_VPC_ID=$(aws cloudformation describe-stacks --profile "$PROFILE_A" --region "$AWS_REGION" --stack-name dt-stack-personal --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue" --output text)
+            PERSONAL_RT=$(aws cloudformation describe-stacks --profile "$PROFILE_A" --region "$AWS_REGION" --stack-name dt-stack-personal --query "Stacks[0].Outputs[?OutputKey=='RouteTableId'].OutputValue" --output text)
+            PERSONAL_CIDR=$(aws cloudformation describe-stacks --profile "$PROFILE_A" --region "$AWS_REGION" --stack-name dt-stack-personal --query "Stacks[0].Outputs[?OutputKey=='VpcCidr'].OutputValue" --output text)
+
+            UFV_VPC_ID=$(aws cloudformation describe-stacks --profile "$PROFILE_B" --region "$AWS_REGION" --stack-name dt-stack-ufv --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue" --output text)
+            UFV_RT=$(aws cloudformation describe-stacks --profile "$PROFILE_B" --region "$AWS_REGION" --stack-name dt-stack-ufv --query "Stacks[0].Outputs[?OutputKey=='RouteTableId'].OutputValue" --output text)
+            UFV_CIDR=$(aws cloudformation describe-stacks --profile "$PROFILE_B" --region "$AWS_REGION" --stack-name dt-stack-ufv --query "Stacks[0].Outputs[?OutputKey=='VpcCidr'].OutputValue" --output text)
+            UFV_ACCOUNT_ID=$(aws sts get-caller-identity --profile "$PROFILE_B" --query Account --output text)
+
+            PEERING_ID=$(aws ec2 describe-vpc-peering-connections --profile "$PROFILE_A" --region "$AWS_REGION" \
+              --filters "Name=requester-vpc-info.vpc-id,Values=$PERSONAL_VPC_ID" "Name=accepter-vpc-info.vpc-id,Values=$UFV_VPC_ID" "Name=status-code,Values=active,pending-acceptance" \
+              --query 'VpcPeeringConnections[0].VpcPeeringConnectionId' --output text)
+
+            if [ -z "$PEERING_ID" ] || [ "$PEERING_ID" = "None" ]; then
+              PEERING_ID=$(aws ec2 create-vpc-peering-connection --profile "$PROFILE_A" --region "$AWS_REGION" \
+                --vpc-id "$PERSONAL_VPC_ID" \
+                --peer-vpc-id "$UFV_VPC_ID" \
+                --peer-owner-id "$UFV_ACCOUNT_ID" \
+                --query 'VpcPeeringConnection.VpcPeeringConnectionId' --output text)
+            fi
+
+            aws ec2 accept-vpc-peering-connection --profile "$PROFILE_B" --region "$AWS_REGION" --vpc-peering-connection-id "$PEERING_ID" >/dev/null 2>&1 || true
+
+            ensure_route "$PROFILE_A" "$AWS_REGION" "$PERSONAL_RT" "$UFV_CIDR" "$PEERING_ID"
+            ensure_route "$PROFILE_B" "$AWS_REGION" "$UFV_RT" "$PERSONAL_CIDR" "$PEERING_ID"
+          else
+            PERSONAL_VPC_ID=$(aws cloudformation describe-stacks --profile "$PROFILE_A" --region "$AWS_REGION" --stack-name dt-stack-personal --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue" --output text 2>/dev/null || true)
+            UFV_VPC_ID=$(aws cloudformation describe-stacks --profile "$PROFILE_B" --region "$AWS_REGION" --stack-name dt-stack-ufv --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue" --output text 2>/dev/null || true)
+
+            if [ -n "$PERSONAL_VPC_ID" ] && [ -n "$UFV_VPC_ID" ] && [ "$PERSONAL_VPC_ID" != "None" ] && [ "$UFV_VPC_ID" != "None" ]; then
+              PEERING_ID=$(aws ec2 describe-vpc-peering-connections --profile "$PROFILE_A" --region "$AWS_REGION" \
+                --filters "Name=requester-vpc-info.vpc-id,Values=$PERSONAL_VPC_ID" "Name=accepter-vpc-info.vpc-id,Values=$UFV_VPC_ID" \
+                --query 'VpcPeeringConnections[0].VpcPeeringConnectionId' --output text 2>/dev/null || true)
+              if [ -n "$PEERING_ID" ] && [ "$PEERING_ID" != "None" ]; then
+                aws ec2 delete-vpc-peering-connection --profile "$PROFILE_A" --region "$AWS_REGION" --vpc-peering-connection-id "$PEERING_ID" >/dev/null 2>&1 || true
+              fi
+            fi
+
+            aws cloudformation delete-stack --profile "$PROFILE_B" --region "$AWS_REGION" --stack-name dt-stack-ufv || true
+            aws cloudformation delete-stack --profile "$PROFILE_A" --region "$AWS_REGION" --stack-name dt-stack-personal || true
+          fi
+        '''
+      }
+    }
+  }
+}
