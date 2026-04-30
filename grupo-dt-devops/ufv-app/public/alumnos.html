@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Módulo Alumnos - Portal Académico UFV</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; background: #f4f6f9; color: #333; }
+    header { background: #1a73e8; color: white; padding: 16px 32px; }
+    header h1 { font-size: 1.4rem; }
+    header a { color: #cce0ff; font-size: 0.9rem; text-decoration: none; }
+    .container { max-width: 960px; margin: 32px auto; padding: 0 16px; }
+    .card { background: white; border-radius: 8px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+    h2 { font-size: 1.1rem; margin-bottom: 16px; color: #1a73e8; border-bottom: 2px solid #e8f0fe; padding-bottom: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th { background: #e8f0fe; padding: 10px; text-align: left; }
+    td { padding: 10px; border-bottom: 1px solid #f0f0f0; }
+    tr:hover td { background: #fafafa; }
+    .btn { background: #1a73e8; color: white; border: none; padding: 8px 18px; border-radius: 4px; cursor: pointer; font-size: 0.9rem; }
+    .btn:hover { background: #1558b0; }
+    .btn-sm { padding: 4px 12px; font-size: 0.8rem; }
+    .form-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+    .form-group { display: flex; flex-direction: column; gap: 4px; }
+    label { font-size: 0.85rem; font-weight: bold; color: #555; }
+    select { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.9rem; min-width: 220px; }
+    .msg { padding: 10px 16px; border-radius: 4px; margin-bottom: 12px; font-size: 0.9rem; }
+    .msg.ok { background: #e6f4ea; color: #2d7d46; }
+    .msg.err { background: #fce8e6; color: #c5221f; }
+    .empty { color: #888; font-style: italic; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Portal Académico UFV — Módulo Alumnos</h1>
+    <a href="/">← Volver al inicio</a>
+  </header>
+
+  <div class="container">
+
+    <div class="card">
+      <h2>Lista de Alumnos</h2>
+      <div id="msg-alumnos"></div>
+      <table id="tabla-alumnos">
+        <thead><tr><th>ID</th><th>Nombre</th><th>Email</th><th>Asignaturas inscritas</th><th>Ver notas</th></tr></thead>
+        <tbody><tr><td colspan="5" class="empty">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Notas del Alumno</h2>
+      <div id="msg-notas"></div>
+      <div id="info-alumno" style="margin-bottom:12px;font-size:0.9rem;color:#555;"></div>
+      <table id="tabla-notas">
+        <thead><tr><th>Asignatura</th><th>Créditos</th><th>Nota</th><th>Estado</th><th>Fecha inscripción</th></tr></thead>
+        <tbody><tr><td colspan="5" class="empty">Selecciona un alumno para ver sus notas.</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Inscribir Alumno en Asignatura</h2>
+      <div id="msg-inscripcion"></div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="sel-alumno">Alumno</label>
+          <select id="sel-alumno"><option value="">-- Selecciona --</option></select>
+        </div>
+        <div class="form-group">
+          <label for="sel-asignatura">Asignatura</label>
+          <select id="sel-asignatura"><option value="">-- Selecciona --</option></select>
+        </div>
+        <button class="btn" onclick="inscribir()">Inscribir</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    async function cargarAlumnos() {
+      try {
+        const res = await fetch('/alumnos/lista');
+        const data = await res.json();
+        const tbody = document.querySelector('#tabla-alumnos tbody');
+        const sel = document.getElementById('sel-alumno');
+        if (!data.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="empty">No hay alumnos registrados.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = data.map(a => `
+          <tr>
+            <td>${a.id}</td>
+            <td>${a.nombre}</td>
+            <td>${a.email}</td>
+            <td>${a.asignaturas_inscritas}</td>
+            <td><button class="btn btn-sm" onclick="cargarNotas(${a.id}, '${a.nombre}')">Ver notas</button></td>
+          </tr>`).join('');
+        sel.innerHTML = '<option value="">-- Selecciona --</option>' +
+          data.map(a => `<option value="${a.id}">${a.nombre}</option>`).join('');
+      } catch (e) {
+        document.getElementById('msg-alumnos').innerHTML = '<div class="msg err">Error al cargar alumnos: ' + e.message + '</div>';
+      }
+    }
+
+    async function cargarNotas(id, nombre) {
+      document.getElementById('info-alumno').textContent = 'Mostrando notas de: ' + nombre;
+      try {
+        const res = await fetch('/alumnos/' + id + '/notas');
+        const data = await res.json();
+        const tbody = document.querySelector('#tabla-notas tbody');
+        if (!data.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="empty">Este alumno no tiene inscripciones.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = data.map(n => `
+          <tr>
+            <td>${n.asignatura}</td>
+            <td>${n.creditos}</td>
+            <td>${n.nota !== null ? n.nota : '-'}</td>
+            <td>${n.estado || '-'}</td>
+            <td>${new Date(n.fecha_inscripcion).toLocaleDateString('es-ES')}</td>
+          </tr>`).join('');
+      } catch (e) {
+        document.getElementById('msg-notas').innerHTML = '<div class="msg err">Error al cargar notas.</div>';
+      }
+    }
+
+    async function cargarAsignaturas() {
+      try {
+        const res = await fetch('/alumnos/asignaturas');
+        const data = await res.json();
+        const sel = document.getElementById('sel-asignatura');
+        sel.innerHTML = '<option value="">-- Selecciona --</option>' +
+          data.map(a => `<option value="${a.id}">${a.nombre} (${a.creditos} cr.)</option>`).join('');
+      } catch (e) {}
+    }
+
+    async function inscribir() {
+      const alumno_id = document.getElementById('sel-alumno').value;
+      const asignatura_id = document.getElementById('sel-asignatura').value;
+      const msgEl = document.getElementById('msg-inscripcion');
+      if (!alumno_id || !asignatura_id) {
+        msgEl.innerHTML = '<div class="msg err">Selecciona un alumno y una asignatura.</div>';
+        return;
+      }
+      try {
+        const res = await fetch('/alumnos/inscribir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ alumno_id: parseInt(alumno_id), asignatura_id: parseInt(asignatura_id) })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          msgEl.innerHTML = '<div class="msg ok">Inscripción realizada correctamente.</div>';
+          cargarAlumnos();
+        } else {
+          msgEl.innerHTML = '<div class="msg err">' + data.message + '</div>';
+        }
+      } catch (e) {
+        msgEl.innerHTML = '<div class="msg err">Error al inscribir.</div>';
+      }
+    }
+
+    cargarAlumnos();
+    cargarAsignaturas();
+  </script>
+</body>
+</html>
