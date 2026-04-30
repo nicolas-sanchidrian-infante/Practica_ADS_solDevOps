@@ -1,0 +1,11 @@
+﻿{
+    "accountKey":  "B",
+    "profile":  "NicolasB",
+    "stack":  "dt-b-lb-db",
+    "region":  "eu-south-2",
+    "accountId":  "135723631148",
+    "vpcId":  "vpc-0680e158ffacc7d0a",
+    "vpcCidr":  "10.20.0.0/16",
+    "publicRouteTableId":  "rtb-033fd3f5d81b4c432",
+    "privateRouteTableId":  "rtb-0efe987e358f78e72"
+}

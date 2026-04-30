@@ -10,7 +10,7 @@ $accounts = @{
   A = @{ Profile = "AlejandroA"; Stack = "dt-a-ad-client" }
   B = @{ Profile = "NicolasB";   Stack = "dt-b-lb-db" }
   C = @{ Profile = "MarioC";     Stack = "dt-c-web-u1" }
-  D = @{ Profile = "GonzaloD";   Stack = "dt-d-web-u2" }
+  D = @{ Profile = "GonzaloD";   Stack = "dt-gonzalo-web-alumnos" }
   E = @{ Profile = "JesusE";     Stack = "dt-e-web-u3" }
 }
 
@@ -31,13 +31,13 @@ $peerings = @(
 function Invoke-AwsJson {
   param(
     [string]$Profile,
-    [string[]]$Args
+    [string[]]$AwsArgs
   )
 
-  $cmd = @("--profile", $Profile, "--region", $Region) + $Args
+  $cmd = @("--profile", $Profile, "--region", $Region) + $AwsArgs
   $out = aws @cmd
   if ($LASTEXITCODE -ne 0) {
-    throw "AWS CLI command failed for profile $Profile: aws $($cmd -join ' ')"
+    throw "AWS CLI command failed for profile ${Profile}: aws $($cmd -join ' ')"
   }
   if ([string]::IsNullOrWhiteSpace($out)) {
     return $null
@@ -52,7 +52,7 @@ function Get-StackOutputValue {
     [string]$OutputKey
   )
 
-  $stackObj = Invoke-AwsJson -Profile $Profile -Args @(
+  $stackObj = Invoke-AwsJson -Profile $Profile -AwsArgs @(
     "cloudformation", "describe-stacks",
     "--stack-name", $Stack,
     "--output", "json"
