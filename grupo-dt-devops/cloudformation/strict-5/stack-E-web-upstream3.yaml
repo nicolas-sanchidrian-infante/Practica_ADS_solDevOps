@@ -15,7 +15,7 @@ Parameters:
     Type: AWS::EC2::KeyPair::KeyName
   AmiLinux:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id
   AdminCidr:
     Type: String
   LbVpcCidr:
@@ -138,7 +138,8 @@ Resources:
                 Resource: [!GetAtt AppStorageBucket.Arn]
               - Effect: Allow
                 Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
-                Resource: [!Sub ${AppStorageBucket.Arn}/*]
+                Resource:
+                  - !Sub "${AppStorageBucket.Arn}/*"
 
   WebS3InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -192,32 +193,6 @@ Resources:
     Properties:
       AllocationId: !GetAtt Web02Eip.AllocationId
       InstanceId: !Ref Web02Instance
-
-  MonthlyBudget:
-    Type: AWS::Budgets::Budget
-    Properties:
-      Budget:
-        BudgetName: DT-E-Mensual
-        BudgetType: COST
-        TimeUnit: MONTHLY
-        BudgetLimit:
-          Amount: !Ref BudgetLimitUSD
-          Unit: USD
-      NotificationsWithSubscribers:
-        - Notification:
-            NotificationType: ACTUAL
-            ComparisonOperator: GREATER_THAN
-            Threshold: 85
-          Subscribers:
-            - SubscriptionType: EMAIL
-              Address: !Ref BudgetEmail
-        - Notification:
-            NotificationType: ACTUAL
-            ComparisonOperator: GREATER_THAN
-            Threshold: 100
-          Subscribers:
-            - SubscriptionType: EMAIL
-              Address: !Ref BudgetEmail
 
 Outputs:
   VpcId:
